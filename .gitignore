@@ -1,3 +1,8 @@
+*.Rprofile
+/**/renv
+*.nc
+/**/aria
+
 # History files
 .Rhistory
 .Rapp.history
