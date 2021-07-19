@@ -1,4 +1,5 @@
 *.Rprofile
+renv.lock
 /**/renv
 *.nc
 /**/aria
