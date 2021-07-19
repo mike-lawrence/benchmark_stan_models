@@ -1,1 +1,1 @@
-# stan_models_for_benchmarking
+# benchmark_stan_models
