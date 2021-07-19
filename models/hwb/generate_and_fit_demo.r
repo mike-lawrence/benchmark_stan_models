@@ -222,6 +222,9 @@ data_for_stan = lst( #lst permits later entries to refer to earlier entries
 # double-check:
 glimpse(data_for_stan)
 
+# ensure model is compiled
+aria:::check_syntax_and_maybe_compile('stan/hwb.stan')
+
 # compose
 aria::compose(
 	data = data_for_stan
