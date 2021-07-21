@@ -33,7 +33,7 @@ sim_pars = lst(
 	#parameters you can play with
 	num_subj = 30 #number of subjects, must be an integer >1
 	, num_vars = 4 #number of 2-level variables manipulated as crossed and within each subject, must be an integer >0
-	, num_trials = 10 #number of trials per subject/condition combo, must be an integer >1
+	, num_trials = 100 #number of trials per subject/condition combo, must be an integer >1
 
 	#the rest of these you shouldn't touch
 	, num_coef = 2^(num_vars)
@@ -226,18 +226,21 @@ data_for_stan = lst( #lst permits later entries to refer to earlier entries
 glimpse(data_for_stan)
 
 # ensure model is compiled
-aria:::check_syntax_and_maybe_compile('stan/hwg.stan')
+aria:::check_syntax_and_maybe_compile('stan/hwg_c.stan')
 
 # compose
 aria::compose(
 	data = data_for_stan
-	, code_path = 'stan/hwg.stan'
-	, out_path = 'nc/hwg.nc'
+	, code_path = 'stan/hwg_c.stan'
+	, out_path = 'nc/hwg_c.nc'
 	, overwrite = T
 )
 
+#access marginalia
+aria::marginalia()
+
 # check posterior diagnostics ----
-post = aria::coda('nc/hwg.nc')
+post = aria::coda('nc/hwg_c.nc')
 
 # Check treedepth, divergences, & rebfmi
 (
