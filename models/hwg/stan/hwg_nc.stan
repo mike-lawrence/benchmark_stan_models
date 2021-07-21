@@ -62,8 +62,8 @@ parameters{
 	// sigma: sd (across subj) for each coefficient
 	vector<lower=0>[k] sigma ;
 
-	// z_z: a helper variable for implementing non-centered parameterization
-	matrix[k,n] z_z ;
+	// z_: a helper variable for implementing non-centered parameterization
+	matrix[k,n] z_ ;
 
 }
 model{
@@ -75,8 +75,8 @@ model{
 	// prior on noise peaked around .8
 	noise ~ weibull(2,1) ;
 
-	// z_z must have normal(0,1) prior for non-centered parameterization
-	to_vector(z_z) ~ std_normal() ;
+	// z_ must have normal(0,1) prior for non-centered parameterization
+	to_vector(z_) ~ std_normal() ;
 
 	// relatively flat prior on correlations
 	chol_corr ~ lkj_corr_cholesky(2) ;
@@ -92,7 +92,7 @@ model{
 		rep_matrix(mu,n)
 		+ transpose(
 			diag_pre_multiply(sigma,chol_corr)
-			* z_z
+			* z_
 		)
 	) ;
 
