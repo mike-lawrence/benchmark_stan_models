@@ -256,7 +256,7 @@ post = aria::coda('nc/hwgls.nc')
 
 # gather summary for core parameters (inc. r̂ & ess)
 (
-	post$draws(variables=c('mu','sigma','r','z_z'))
+	post$draws(variables=c('mu','sigma','r','z_'))
 	%>% posterior::summarise_draws(.cores=parallel::detectCores())
 ) ->
 	par_summary
