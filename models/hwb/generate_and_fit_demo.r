@@ -222,20 +222,23 @@ data_for_stan = lst( #lst permits later entries to refer to earlier entries
 # double-check:
 glimpse(data_for_stan)
 
+#set the model and posterior paths
+mod_path = 'stan/hwb_nc.stan'
+post_path = 'nc/hwb_nc.nc'
+
 # ensure model is compiled
-aria:::check_syntax_and_maybe_compile('stan/hwb.stan')
+aria:::check_syntax_and_maybe_compile(mod_path)
 
 # compose
 aria::compose(
 	data = data_for_stan
-	, code_path = 'stan/hwb.stan'
-	, out_path = 'nc/hwb.nc'
+	, code_path = mod_path
+	, out_path = post_path
 	, overwrite = T
 )
 
 # check posterior diagnostics ----
-
-post = aria::coda('nc/hwb.nc')
+post = aria::coda(post_path)
 
 # Check treedepth, divergences, & rebfmi
 (
@@ -251,7 +254,13 @@ post = aria::coda('nc/hwb.nc')
 
 # gather summary for core parameters (inc. r̂ & ess)
 (
-	post$draws(variables=c('mu','sigma','r','z_'))
+	case_when(
+		str_detect(mod_path,'_nc')
+		~ c('mu','sigma','r','z_')
+		, T
+		~ c('mu','sigma','r','z')
+	)
+	%>% post$draws()
 	%>% posterior::summarise_draws(.cores=parallel::detectCores())
 ) ->
 	par_summary
