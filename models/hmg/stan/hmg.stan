@@ -1,4 +1,5 @@
 //aria: compile=1
+//aria: syntax_ignore = "Warning: The parameter iZq has no priors."
 functions{
 	// flatten_lower_tri: function that returns the lower-tri of a matrix, flattened to a vector
 	vector flatten_lower_tri(matrix mat) {
@@ -45,13 +46,16 @@ data{
 	array[rXq] int<lower=1,upper=nI> iXq ;
 
 	// nY: num entries in the observation vectors
-	int<lower=nXg*nXq*nI> nY ;
+	int<lower=nI> nY ;
 
 	// Y: observations
 	vector[nY] Y ;
 
 	// yXq: which row in Xq is associated with each observation in Y
 	array[nY] int<lower=1,upper=rXq> yXq ;
+
+	// centered: whether to monolithically-center (1) or non-center (2) mid-hierarchy parameters
+	int<lower=0,upper=1> centered ;
 
 }
 parameters{
@@ -68,8 +72,11 @@ parameters{
 	// iZq_cholcorr: cholesky-factor of correlation structure associated with variability among individuals on influence of within-individual predictors
 	cholesky_factor_corr[nXq] iZq_cholcorr ;
 
+	// iZq: by-individual coefficients (centered parameterization)
+	array[nI*centered] row_vector[nXq] iZq ;
+
 	// iZq_: helper-variable (note underscore suffix) for non-centered parameterization of iZq
-	matrix[nXq,nI] iZq_ ;
+	array[(1-centered)] matrix[nXq,nI] iZq_ ;
 
 }
 model{
@@ -82,13 +89,21 @@ model{
 	to_vector(Z) ~ std_normal() ;
 
 	// using the group predictors and coefficients, compute condition coefficients for each group
-	matrix[rXg,nXq] gZq ; //n.b. transposed so that the qZs are now row_vectors
+	// NOT SURE THIS IS THE MOST EFFICIENT WAY TO DO THIS (ESP. GIVEN NECESSARY LATER CONVERSION)
+	matrix[rXg,nXq] gZq ;
 	for(this_nXq in 1:nXq){
 		gZq[,this_nXq]= rows_dot_product(
 			rep_matrix(to_row_vector(Z[,this_nXq]),rXg)
 			, Xg
 		) ;
 	}
+
+	//convert gZq from matrix to array of row-vectors
+	array[rXg] row_vector[nXq] gZq_arr ;
+	for(this_rXg in 1:rXg){
+		gZq_arr[this_rXg] = gZq[this_rXg] ;
+	}
+
 
 	////
 	// individual-level structure
@@ -100,25 +115,43 @@ model{
 	// flat prior on correlations
 	iZq_cholcorr ~ lkj_corr_cholesky(1) ;
 
-	// iZq_ must have a standard-normal prior for non-centered parameterization
-	to_vector(iZq_) ~ std_normal() ;
+	matrix[nI,nXq] iZq_mat ;
+	if(centered==1){
+		// multi-normal structure for iZq
+		iZq ~ multi_normal_cholesky(
+			gZq_arr[iXg]
+			, diag_pre_multiply(iZq_sd, iZq_cholcorr)
+		) ;
 
-	// compute values for individuals given group associated group values and the individuals'
-	//   deviations therefrom, scaled by ind_sd
-	matrix[nI,nXq] iZq = (
-		gZq[iXg]
-		+ transpose(
-			diag_pre_multiply(
-				iZq_sd
-				, iZq_cholcorr
+		//convert iZq from array of row-vectors to matrix
+		// (hopefully replaceable by `to_matrix(iZq)` soon,
+		// see: https://github.com/stan-dev/cmdstan/issues/1015 )
+		for(this_nI in 1:nI){
+			iZq_mat[this_nI] = iZq[this_nI] ;
+		}
+
+	}else{
+		// iZq_ must have a standard-normal prior for non-centered parameterization
+		to_vector(iZq_[1]) ~ std_normal() ;
+
+		// compute values for individuals given group associated group values and the individuals'
+		//   deviations therefrom, scaled by ind_sd
+		iZq_mat = (
+			gZq[iXg]
+			+ transpose(
+				diag_pre_multiply(
+					iZq_sd
+					, iZq_cholcorr
+				)
+				* iZq_[1]
 			)
-			* iZq_
-		)
-	);
+		);
+
+	}
 
 	// using the indivividual condition coefficients and predictors, compute
 	// values for each individual
-	vector[nXq] iZq_dot_Xq = rows_dot_product( iZq[iXq] , Xq ) ;
+	vector[rXq] iZq_dot_Xq = rows_dot_product( iZq_mat[iXq] , Xq ) ;
 
 	////
 	// observation-level structure

@@ -30,10 +30,12 @@ set.seed(1) #change this to make different data
 #setting the data simulation parameters
 
 #parameters you can play with
-nI_per_group = 3 #number of individuals, must be an integer >1
-nG_vars = 1 #number of 2-level variables manipulated as crossed and across individuals, must be an integer >0
+nG_vars = 2 #number of 2-level variables manipulated as crossed and across individuals, must be an integer >0
 nQ_vars = 2 #number of 2-level variables manipulated as crossed and within each individual, must be an integer >0
-num_Y_per_iq = 3 #number of observations per individual/condition combo, must be an integer >1
+nI_per_group = 1e2 #number of individuals, must be an integer >1
+nY_per_iq = 1e2 #number of observations per individual/condition combo, must be an integer >1
+#the latter two combine to determine whether centered or non-centered will sample better
+
 
 #the rest of these you shouldn't touch
 nXq = 2^(nQ_vars)
@@ -106,7 +108,7 @@ uXq = sim_contrasts(nQ_vars,'Q')
 	iZq_dot_Xq
 	%>% group_by(q,.add=T)
 	%>% summarise(
-		value = rnorm(num_Y_per_iq,value,Y_sd)
+		value = rnorm(nY_per_iq,value,Y_sd)
 		, .groups = 'keep'
 	)
 ) ->
@@ -288,9 +290,33 @@ data_for_stan = lst( #lst permits later entries to refer to earlier entries
 # double-check:
 glimpse(data_for_stan)
 
-#set the model and posterior paths
-mod_path = 'stan/hmg_nc.stan'
-post_path = 'nc/hmg_nc.nc'
+#set the model path (automated bc in this repo there's only one)
+mod_path = fs::dir_ls(
+	path = 'stan'
+	, glob = '*.stan'
+)
+
+#set the model centered/non-centeredness
+#  generally, if *either* nI_per_group *or* num_Y_per_q is small, non-centered will sample better than centered
+data_for_stan$centered = TRUE
+
+#conversion to 1/0 for stan
+data_for_stan$centered = as.numeric(data_for_stan$centered)
+
+#set the posterior path (automated but you could do your own if you had multiple models)
+(
+	mod_path
+	%>% fs::path_file()
+	%>% fs::path_ext_remove()
+	%>% paste0(
+		ifelse(data_for_stan$centered,'_c','_nc')
+	)
+	%>% fs::path(
+		'posteriors'
+		, .
+		, ext = 'netcdf4'
+	)
+) -> post_path
 
 # ensure model is compiled
 aria:::check_syntax_and_maybe_compile(mod_path)
@@ -302,6 +328,10 @@ aria::compose(
 	, out_path = post_path
 	, overwrite = T
 )
+
+#how long did it take?
+aria::marginalia()$time
+
 
 # check posterior diagnostics ----
 post = aria::coda(post_path)
@@ -336,7 +366,12 @@ post = aria::coda(post_path)
 (
 	par_summary
 	%>% filter(rhat>1.01)
-	%>% View()
+	%>% (function(suspects){
+		if(nrow(suspects)>1){
+			View(suspects)
+		}
+		return(paste('# suspect parameters:',nrow(suspects)))
+	})()
 )
 
 # Viz recovery of non-correlation parameters ----
@@ -520,3 +555,4 @@ post = aria::coda(post_path)
 		, fill = 'Rhat'
 	)
 )
+
