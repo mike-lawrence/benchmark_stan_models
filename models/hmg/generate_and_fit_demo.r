@@ -1,14 +1,38 @@
+# Glossary ----
+
+# n.b. the following employs a mix of snake_case and camelCase that is sure to
+#  vex many, but represents the author's best solution to the competing aims of
+#  clarity & brevity.
+
+# Y: observed outcome
+# nY: number of observed outcomes
+# X: predictor/contrast matrix
+# nX: number of predictors (columns in the contrast matrix)
+# rX: number of rows in the contrast matrix X
+# (i)ndividual: a unit of observation within which correlated measurements may take place
+# (c)ondition: a labelled set of observations within an individual that share some feature/predictor or conjunction of features/predictors
+# Xc: condition-level contrast matrix
+# nXc: number of predictors in the condition-level contrast matrix
+# rXc: number of rows in the condition-level contrast matrix
+# yXc: for each observation in y, an index indicating the associated row in Xc corresponding to that observation's individual/condition combo
+# (g)roup: a collection of individuals that share some feature/predictor
+# Xg: group-level contrast matrix
+# nXg: number of predictors in the group-level contrast matrix
+# rXg: number of rows in the group-level contrast matrix
+# Z: matrix of coefficient row-vectors to be dot-product'd with a contrast matrix
+# iZc: matrix of coefficient row-vectors associated with each individual
+
 # Preamble (options, installs, imports & custom functions) ----
 
-options(warn=1) #really should be default in R
-`%!in%` = Negate(`%in%`) #should be in base R!
+options(warn=1) # really should be default in R
+`%!in%` = Negate(`%in%`) # should be in base R!
 
 # specify the packages used:
 required_packages = c(
 	'github.com/rmcelreath/rethinking' # for rlkjcorr & rmvrnom2
-	, 'github.com/stan-dev/cmdstanr' #for Stan stuff
+	, 'github.com/stan-dev/cmdstanr' # for Stan stuff
 	, 'github.com/mike-lawrence/aria/aria' # for aria
-	, 'tidyverse' #for all that is good and holy
+	, 'tidyverse' # for all that is good and holy
 )
 
 # load the helper functions:
@@ -17,7 +41,7 @@ for(file in fs::dir_ls('r')){
 	source(file)
 }
 
-#install any required packages not already present
+# install any required packages not already present
 install_if_missing(required_packages)
 
 # load tidyverse & aria
@@ -25,96 +49,96 @@ library(tidyverse)
 library(aria)
 
 # Simulate data ----
-set.seed(1) #change this to make different data
+set.seed(1) # change this to make different data
 
-#setting the data simulation parameters
+# setting the data simulation parameters
 
-#parameters you can play with
-nG_vars = 2 #number of 2-level variables manipulated as crossed and across individuals, must be an integer >0
-nQ_vars = 2 #number of 2-level variables manipulated as crossed and within each individual, must be an integer >0
-nI_per_group = 1e2 #number of individuals, must be an integer >1
-nY_per_iq = 1e2 #number of observations per individual/condition combo, must be an integer >1
-#the latter two combine to determine whether centered or non-centered will sample better
+# parameters you can play with
+nG_vars = 2 # number of 2-level variables manipulated as crossed and across individuals, must be an integer >0
+nC_vars = 2 # number of 2-level variables manipulated as crossed and within each individual, must be an integer >0
+nI_per_group = 1e2 # number of individuals, must be an integer >1
+nY_per_ic = 1e2 # number of observations per individual/condition combo, must be an integer >1
+# the latter two combine to determine whether centered or non-centered will sample better
 
 
-#the rest of these you shouldn't touch
-nXq = 2^(nQ_vars)
+# the rest of these you shouldn't touch
+nXc = 2^(nC_vars)
 nXg = 2^(nG_vars)
-Z = matrix(rnorm(nXg*nXq),nrow=nXg,ncol=nXq)
-iZq_sd = rweibull(nXq,2,1)
-iZq_r_mat = rethinking::rlkjcorr(1,nXq,eta=1)
+Z = matrix(rnorm(nXg*nXc),nrow=nXg,ncol=nXc)
+iZc_sd = rweibull(nXc,2,1)
+iZc_r_mat = rethinking::rlkjcorr(1,nXc,eta=1)
 Y_sd = rweibull(1,2,1)
-iZq_r_vec = iZq_r_mat[lower.tri(iZq_r_mat)]
+iZc_r_vec = iZc_r_mat[lower.tri(iZc_r_mat)]
 
 
-#compute Xg
+# compute Xg
 Xg = sim_contrasts(nG_vars,'G')
 
-# compute gZq
-gZq = matrix(NA,nrow=nXg,ncol=nXq)
-for(this_nXq in 1:nXq){
+# compute gZc
+gZc = matrix(NA,nrow=nXg,ncol=nXc)
+for(this_nXc in 1:nXc){
 	for(this_nXg in 1:nXg){
-		gZq[this_nXg,this_nXq] = Xg[this_nXg,] %*% Z[,this_nXq]
+		gZc[this_nXg,this_nXc] = Xg[this_nXg,] %*% Z[,this_nXc]
 	}
 }
 
-#compute iZq
+# compute iZc
 (
 	1:nXg
 	%>% map_dfr(
 		.f = function(this_nXg){(
 			rethinking::rmvnorm2(
 				n = nI_per_group
-				, Mu = gZq[this_nXg,]
-				, sigma = iZq_sd
-				, Rho = iZq_r_mat
+				, Mu = gZc[this_nXg,]
+				, sigma = iZc_sd
+				, Rho = iZc_r_mat
 			)
 			%>% as_tibble(
-				.name_repair = function(x) paste0('iZq[.,',1:length(x),']')
+				.name_repair = function(x) paste0('iZc[.,',1:length(x),']')
 			)
 			%>% rename()
 			%>% mutate(
 				g = this_nXg
-				, individual = paste(g,1:n(),sep='_') #important that individuals have unique identifiers across groups
+				, individual = paste(g,1:n(),sep='_') # important that individuals have unique identifiers across groups
 			)
 		)}
 	)
 ) ->
-	iZq
+	iZc
 
-#compute Xq
-uXq = sim_contrasts(nQ_vars,'Q')
+# compute Xc
+uXc = sim_contrasts(nC_vars,'C')
 
-#compute iZq_dot_Xq
+# compute iZc_dot_Xc
 (
-	iZq
+	iZc
 	%>% group_by(g,individual)
 	%>% summarise(
 		{function(x){
-			x = t(as.matrix(select(x,starts_with('iZq')),))
-			this_dot = rep(NA,nXq)
-			for(this_nXq in 1:nXq){
-				this_dot[this_nXq] = uXq[this_nXq,] %*% x
+			x = t(as.matrix(select(x,starts_with('iZc')),))
+			this_dot = rep(NA,nXc)
+			for(this_nXc in 1:nXc){
+				this_dot[this_nXc] = uXc[this_nXc,] %*% x
 			}
-			tibble(q=1:nXq,value=this_dot)
+			tibble(c=1:nXc,value=this_dot)
 		}}(cur_data())
 		, .groups = 'keep'
 	)
 ) ->
-	iZq_dot_Xq
+	iZc_dot_Xc
 
-#compute Y
+# compute Y
 (
-	iZq_dot_Xq
-	%>% group_by(q,.add=T)
+	iZc_dot_Xc
+	%>% group_by(c,.add=T)
 	%>% summarise(
-		value = rnorm(nY_per_iq,value,Y_sd)
+		value = rnorm(nY_per_ic,value,Y_sd)
 		, .groups = 'keep'
 	)
 ) ->
 	Y
 
-#join with group & condition columns
+# join with group & condition columns
 (
 	Y
 	%>% left_join((
@@ -122,31 +146,32 @@ uXq = sim_contrasts(nQ_vars,'Q')
 		%>% mutate(g=1:n())
 	))
 	%>% left_join((
-		attr(uXq,'data')
-		%>% mutate(q=1:n())
+		attr(uXc,'data')
+		%>% mutate(c=1:n())
 	))
 	%>% ungroup()
-	%>% select(everything(),-g,-q,-value,value)
+	%>% select(everything(),-g,-c,-value,value)
 ) ->
 	dat
 
-#dat is now what one would typically have as collected data
+# dat is now what one would typically have as collected data
 dat
 
-# Compute inputs to Stan model ----
-
-#if there's no missing data (as in this synthetic example), we could proceed with modelling,
+# if there's no missing data (as in this synthetic example), we could proceed with modelling,
 #  but to demonstrate how to handle missing data, we'll do a bit of extra work:
 
-#Uncomment next section to induce data-missingness (causes some Ss to be missing whole conditions)
+# Uncomment next section to induce data-missingness (causes some Ss to be missing whole conditions)
 (
 	dat
-	#first collapse to individual-by-condition stats
-	%>% group_by(
-		across(-value)
-	)
-	%>% summarise(.groups='drop')
-	%>% slice_sample(prop=.9)
+	# select all but value
+	%>% select(-value)
+	# get distinct rows (no more individual trials)
+	%>% distinct()
+	# group by individual
+	%>% group_by(individual)
+	# toss one condition
+	%>% slice_sample(n=(nXc-1))
+	# semi-join to keep all in dat that have been kept above
 	%>% semi_join(
 		x = dat
 		, y = .
@@ -154,12 +179,28 @@ dat
 ) ->
 	dat
 
-#compute Xg from distinct combinations of groups
+nrow(dat)
+
+# Compute inputs to Stan model ----
+
+# ungroup (necessary) & sort by individual (not necessary but why not)
 (
 	dat
+	%>% ungroup()
+	%>% arrange(individual)
+) ->
+	dat
+
+# compute Xg from distinct combinations of groups
+(
+	dat
+	# select down to any G vars
 	%>% select(starts_with('G'))
+	# collapse to distinct set of rows (combinations of grouping variables)
 	%>% distinct()
-	#add the contrast matrix columns
+	# arrange (not really necessary, but why not)
+	%>% arrange()
+	# add the contrast matrix columns
 	%>% mutate(
 		contrasts = get_contrast_matrix_rows_as_list(
 			data = .
@@ -176,63 +217,92 @@ dat
 ) ->
 	Xg_with_vars
 
-#join Xg with dat to label individuals with corresponding row from Xg
+# show contrasts
+(
+	Xg_with_vars
+	%>% unnest(contrasts)
+)
+
+# join Xg with dat to label individuals with corresponding row from Xg
 (
 	Xg_with_vars
 	# add row identifier
 	%>% mutate(Xg_row=1:n())
-	%>% right_join((
+	# join with dat, collapsed to 1-row per individual with their group info
+	%>% right_join((# right-join to apply the row order from dat
 		dat
 		%>% select(individual,starts_with('G'))
 		%>% distinct()
 	))
-	%>% arrange(individual)
 	%>% pull(Xg_row)
 ) ->
 	iXg
 
-#compute Xq from distinct combinations of individuals & conditions
+# compute complete_Xc from distinct combinations of individuals & conditions
 (
 	dat
-	%>% select(individual,starts_with('Q'))
+	# select individual & any condition-defining columns
+	%>% select(individual,starts_with('C'))
+	# collapse down to distinct rows (1 per individual/conditions combo)
 	%>% distinct()
-	%>% arrange(individual)
-	#add the contrast matrix columns
+	# expand (in case there's any missing data; doesn't hurt if not)
+	%>% exec(expand_grid,!!!.)
+	# arrange (not really necessary, but why not)
+	%>% arrange()
+	# add the contrast matrix columns
 	%>% mutate(
 		contrasts = get_contrast_matrix_rows_as_list(
 			data = .
 			# the following complicated specification of the formula is a by-product of making this example
 			# work for any number of variables =  normally you would do something like this
 			# (for 2 variables for example):
-			# formula = ~ Q1*Q2
-			, formula = as.formula(paste0('~',paste0('Q',1:nQ_vars,collapse='*')))
+			# formula = ~ C1*C2
+			, formula = as.formula(paste0('~',paste0('C',1:nC_vars,collapse='*')))
 			# half-sum contrasts are nice for 2-level variables bc they yield parameters whose value
 			# is the difference between conditions
 			, contrast_kind = halfsum_contrasts
 		)
 	)
 ) ->
-	Xq_with_vars
+	complete_Xc_with_vars
 
-#join Xq with dat to label observations with corresponding row from Xq
+# show the unique contrasts
 (
-	Xq_with_vars
-	# add row identifier
-	%>% mutate(Xq_row=1:n())
-	%>% right_join(
-		dat
-	)
+	complete_Xc_with_vars
+	%>% select(-individual)
+	%>% distinct()
+	%>% unnest(contrasts)
+)
+
+# subset down to just those individual-condition combos actually present in the data
+#  it's ok if there's no missing data and nrow(complete_Xc_with_vars)==nrow(Xc_with_vars)
+(
+	complete_Xc_with_vars
+	%>% semi_join(dat)
 ) ->
-	dat_with_Xq
+	Xc_with_vars
+
+
+# join Xc with dat to label observations with corresponding row from Xc
+(
+	Xc_with_vars
+	# add row identifier
+	%>% mutate(Xc_row=1:n())
+	# right-join with dat to preserve dat's row order
+	%>% right_join(dat)
+	# pull the Xc row identifier
+	%>% pull(Xc_row)
+) ->
+	yXc
 
 
 # package for stan & sample ----
 
-data_for_stan = lst( #lst permits later entries to refer to earlier entries
+data_for_stan = lst( # lst permits later entries to refer to earlier entries
 
-	####
+	# # # #
 	# Entries we need to specify ourselves
-	####
+	# # # #
 
 
 	# Xg: group-level predictor matrix
@@ -246,26 +316,26 @@ data_for_stan = lst( #lst permits later entries to refer to earlier entries
 	# iXg: which group each individual is associated with
 	, iXg = iXg
 
-	# Xq: condition-level predictor matrix
-	, Xq = (
-		Xq_with_vars
+	# Xc: condition-level predictor matrix
+	, Xc = (
+		Xc_with_vars
 		%>% select(contrasts)
 		%>% unnest(contrasts)
 		%>% as.matrix()
 	)
 
-	# iXq: which individual is associated with each row in Xq
-	, iXq = as.numeric(factor(Xq_with_vars$individual))
+	# iXc: which individual is associated with each row in Xc
+	, iXc = as.numeric(factor(Xc_with_vars$individual))
 
 	# Y: observations
-	, Y = dat_with_Xq$value
+	, Y = dat$value
 
-	# yXq: which row in Xq is associated with each observation in Y
-	, yXq = dat_with_Xq$Xq_row
+	# yXc: which row in Xc is associated with each observation in Y
+	, yXc = yXc
 
-	####
+	# # # #
 	# Entries computable from the above
-	####
+	# # # #
 
 	# nXg: number of cols in the group-level predictor matrix
 	, nXg = ncol(Xg)
@@ -274,13 +344,13 @@ data_for_stan = lst( #lst permits later entries to refer to earlier entries
 	, rXg = nrow(Xg)
 
 	# nI: number of individuals
-	, nI = max(iXq)
+	, nI = max(iXc)
 
-	# nXq: number of cols in the condition-level predictor matrix
-	, nXq = ncol(Xq)
+	# nXc: number of cols in the condition-level predictor matrix
+	, nXc = ncol(Xc)
 
-	# rXq: number of rows in the condition-level predictor matrix
-	, rXq = nrow(Xq)
+	# rXc: number of rows in the condition-level predictor matrix
+	, rXc = nrow(Xc)
 
 	# nY: num entries in the observation vectors
 	, nY = length(Y)
@@ -290,20 +360,20 @@ data_for_stan = lst( #lst permits later entries to refer to earlier entries
 # double-check:
 glimpse(data_for_stan)
 
-#set the model path (automated bc in this repo there's only one)
+# set the model path (automated bc in this repo there's only one)
 mod_path = fs::dir_ls(
 	path = 'stan'
 	, glob = '*.stan'
 )
 
-#set the model centered/non-centeredness
-#  generally, if *either* nI_per_group *or* num_Y_per_q is small, non-centered will sample better than centered
+# set the model centered/non-centeredness
+#  generally, if *either* nI_per_group *or* num_Y_per_ic is small, non-centered will sample better than centered
 data_for_stan$centered = TRUE
 
-#conversion to 1/0 for stan
+# conversion to 1/0 for stan
 data_for_stan$centered = as.numeric(data_for_stan$centered)
 
-#set the posterior path (automated but you could do your own if you had multiple models)
+# set the posterior path (automated but you could do your own if you had multiple models)
 (
 	mod_path
 	%>% fs::path_file()
@@ -329,7 +399,7 @@ aria::compose(
 	, overwrite = T
 )
 
-#how long did it take?
+# how long did it take?
 aria::marginalia()$time
 
 
@@ -344,7 +414,7 @@ post = aria::coda(post_path)
 	%>% summarise(
 		max_treedepth = max(treedepth)
 		, num_divergent = sum(divergent)
-		, rebfmi = var(energy)/(sum(diff(energy)^2)/n()) #n.b. reciprocal of typical EBFMI, so bigger=bad, like rhat
+		, rebfmi = var(energy)/(sum(diff(energy)^2)/n()) # n.b. reciprocal of typical EBFMI, so bigger=bad, like rhat
 	)
 )
 
@@ -362,7 +432,7 @@ post = aria::coda(post_path)
 	%>% summary()
 )
 
-#View those with suspect r̂
+# View those with suspect r̂
 (
 	par_summary
 	%>% filter(rhat>1.01)
@@ -376,7 +446,7 @@ post = aria::coda(post_path)
 
 # Viz recovery of non-correlation parameters ----
 (
-	post$draws(variables=c('Y_sd','Z','iZq_sd'))
+	post$draws(variables=c('Y_sd','Z','iZc_sd'))
 	%>% posterior::as_draws_df()
 	%>% select(-.draw)
 	%>% pivot_longer(
@@ -393,15 +463,15 @@ post = aria::coda(post_path)
 				true = as.vector(Z)
 				, variable = paste0(
 					'Z['
-					,rep(1:nXg,times=nXq)
+					,rep(1:nXg,times=nXc)
 					,','
-					,rep(1:nXq,each=nXg)
+					,rep(1:nXc,each=nXg)
 					,']'
 				)
 			)
 			, tibble(
-				true = iZq_sd
-				, variable = paste0('iZq_sd[',1:length(true),']')
+				true = iZc_sd
+				, variable = paste0('iZc_sd[',1:length(true),']')
 			)
 		)
 	)
@@ -474,7 +544,7 @@ post = aria::coda(post_path)
 
 # Viz recovery of correlations ----
 (
-	post$draws(variables='iZq_r_vec')
+	post$draws(variables='iZc_r_vec')
 	%>% posterior::as_draws_df()
 	%>% select(-.draw)
 	%>% pivot_longer(
@@ -483,10 +553,10 @@ post = aria::coda(post_path)
 	)
 	%>% left_join(
 		tibble(
-			true = iZq_r_vec
+			true = iZc_r_vec
 			, variable = case_when(
 				length(true)==1 ~ 'r'
-				, T ~ paste0('iZq_r_vec[',1:length(true),']')
+				, T ~ paste0('iZc_r_vec[',1:length(true),']')
 			)
 		)
 	)
