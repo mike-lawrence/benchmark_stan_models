@@ -477,12 +477,25 @@ post = aria::coda(post_path)
 
 # Viz recovery of (some) non-correlation parameters ----
 (
-	post$draws(variables=c('Z','iZc_sd'))
+	post$draws(variables=c('Z','iZc_sd','p_lapse_intercept'))
 	%>% posterior::as_draws_df()
 	%>% select(-.draw)
 	%>% pivot_longer(
 		cols = -c(.chain,.iteration)
 		, names_to = 'variable'
+	)
+	%>% filter(
+		variable!=paste0('Z[',nXc21,',1]')
+	)
+	%>% mutate(
+		value = case_when(
+			variable=='p_lapse_intercept' ~ qlogis(value)
+			, T ~ value
+		)
+		, variable = case_when(
+			variable=='p_lapse_intercept' ~ paste0('Z[',nXc21,',1]')
+			, T ~ variable
+		)
 	)
 	%>% left_join(
 		bind_rows(
@@ -490,9 +503,9 @@ post = aria::coda(post_path)
 				true = as.vector(t(Z))
 				, variable = paste0(
 					'Z['
-					,rep(1:nXc2,times=nXg)
+					,rep(1:nXc21,times=nXg)
 					,','
-					,rep(1:nXg,each=nXc2)
+					,rep(1:nXg,each=nXc21)
 					,']'
 				)
 			)
