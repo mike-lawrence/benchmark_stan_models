@@ -161,32 +161,38 @@ dat
 #  but to demonstrate how to handle missing data, we'll do a bit of extra work:
 
 # Uncomment next section to induce data-missingness (causes some Ss to be missing whole conditions)
-(
-	dat
-	# select all but value
-	%>% select(-value)
-	# get distinct rows (no more individual trials)
-	%>% distinct()
-	# group by individual
-	%>% group_by(individual)
-	# toss one condition
-	%>% slice_sample(n=(nXc-1))
-	# semi-join to keep all in dat that have been kept above
-	%>% semi_join(
-		x = dat
-		, y = .
-	)
-) ->
-	dat
+# (
+# 	dat
+# 	# select all but value
+# 	%>% select(-value)
+# 	# get distinct rows (no more individual trials)
+# 	%>% distinct()
+# 	# group by individual
+# 	%>% group_by(individual)
+# 	# toss one condition
+# 	%>% slice_sample(n=(nXc-1))
+# 	# semi-join to keep all in dat that have been kept above
+# 	%>% semi_join(
+# 		x = dat
+# 		, y = .
+# 	)
+# ) ->
+# 	dat
 
 nrow(dat)
 
 # Compute inputs to Stan model ----
 
-# ungroup (necessary) & sort by individual (not necessary but why not)
+# Some data prep
 (
 	dat
+	# ungroup (necessary)
 	%>% ungroup()
+	# ensure individual is a sequential numeric
+	%>% mutate(
+		individual = as.numeric(factor(individual))
+	)
+	# arrange rows by individual
 	%>% arrange(individual)
 ) ->
 	dat
@@ -233,7 +239,9 @@ nrow(dat)
 		dat
 		%>% select(individual,starts_with('G'))
 		%>% distinct()
+
 	))
+	%>% arrange(individual)
 	%>% pull(Xg_row)
 ) ->
 	iXg
@@ -246,7 +254,10 @@ nrow(dat)
 	# collapse down to distinct rows (1 per individual/conditions combo)
 	%>% distinct()
 	# expand (in case there's any missing data; doesn't hurt if not)
-	%>% exec(expand_grid,!!!.)
+	# %>% exec(expand_grid,!!!.)
+	%>% as.list()
+	%>% map(unique)
+	%>% cross_df()
 	# arrange (not really necessary, but why not)
 	%>% arrange()
 	# add the contrast matrix columns
@@ -289,7 +300,10 @@ nrow(dat)
 	# add row identifier
 	%>% mutate(Xc_row=1:n())
 	# right-join with dat to preserve dat's row order
-	%>% right_join(dat)
+	%>% right_join(
+		mutate(dat,dat_row=1:n())
+	)
+	%>% arrange(dat_row)
 	# pull the Xc row identifier
 	%>% pull(Xc_row)
 ) ->
@@ -379,7 +393,7 @@ data_for_stan$centered = as.numeric(data_for_stan$centered)
 	%>% fs::path_file()
 	%>% fs::path_ext_remove()
 	%>% paste0(
-		ifelse(data_for_stan$centered,'_c','_nc')
+		ifelse(data_for_stan$centered,'_c2','_nc')
 	)
 	%>% fs::path(
 		'posteriors'
@@ -460,12 +474,12 @@ post = aria::coda(post_path)
 				, variable = 'Y_sd'
 			)
 			, tibble(
-				true = as.vector(Z)
+				true = as.vector(t(Z))
 				, variable = paste0(
 					'Z['
-					,rep(1:nXg,times=nXc)
+					,rep(1:nXc,times=nXg)
 					,','
-					,rep(1:nXc,each=nXg)
+					,rep(1:nXg,each=nXc)
 					,']'
 				)
 			)
@@ -540,6 +554,7 @@ post = aria::coda(post_path)
 		, fill = 'Rhat'
 	)
 )
+
 
 
 # Viz recovery of correlations ----

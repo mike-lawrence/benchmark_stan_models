@@ -192,7 +192,7 @@ model{
 					iZc_sd
 					, iZc_cholcorr
 				)
-				* iZc_[1]
+				* (iZc_[1])
 			)
 		);
 

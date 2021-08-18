@@ -22,7 +22,6 @@
 # Z: matrix of coefficient row-vectors to be dot-product'd with a contrast matrix
 # iZc: matrix of coefficient row-vectors associated with each individual
 
-
 # Preamble (options, installs, imports & custom functions) ----
 
 options(warn=1) # really should be default in R
@@ -197,10 +196,16 @@ dat
 
 # Compute inputs to Stan model ----
 
-# ungroup (necessary) & sort by individual (not necessary but why not)
+# Some data prep
 (
 	dat
+	# ungroup (necessary)
 	%>% ungroup()
+	# ensure individual is a sequential numeric
+	%>% mutate(
+		individual = as.numeric(factor(individual))
+	)
+	# arrange rows by individual
 	%>% arrange(individual)
 ) ->
 	dat
@@ -248,6 +253,7 @@ dat
 		%>% select(individual,starts_with('G'))
 		%>% distinct()
 	))
+	%>% arrange(individual)
 	%>% pull(Xg_row)
 ) ->
 	iXg
@@ -260,7 +266,10 @@ dat
 	# collapse down to distinct rows (1 per individual/conditions combo)
 	%>% distinct()
 	# expand (in case there's any missing data; doesn't hurt if not)
-	%>% exec(expand_grid,!!!.)
+	# %>% exec(expand_grid,!!!.)
+	%>% as.list()
+	%>% map(unique)
+	%>% cross_df()
 	# arrange (not really necessary, but why not)
 	%>% arrange()
 	# add the contrast matrix columns
@@ -303,7 +312,10 @@ dat
 	# add row identifier
 	%>% mutate(Xc_row=1:n())
 	# right-join with dat to preserve dat's row order
-	%>% right_join(dat)
+	%>% right_join(
+		mutate(dat,dat_row=1:n())
+	)
+	%>% arrange(dat_row)
 	# pull the Xc row identifier
 	%>% pull(Xc_row)
 ) ->
@@ -475,12 +487,12 @@ post = aria::coda(post_path)
 	%>% left_join(
 		bind_rows(
 			tibble(
-				true = as.vector(Z)
+				true = as.vector(t(Z))
 				, variable = paste0(
 					'Z['
-					,rep(1:nXg,times=nXc2)
+					,rep(1:nXc2,times=nXg)
 					,','
-					,rep(1:nXc2,each=nXg)
+					,rep(1:nXg,each=nXc2)
 					,']'
 				)
 			)
