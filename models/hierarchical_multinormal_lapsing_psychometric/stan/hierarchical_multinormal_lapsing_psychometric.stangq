@@ -1,0 +1,54 @@
+//aria: compile=1
+//aria: syntax_ignore = c("Warning: The parameter iZq has no priors.", "was declared but was not used in the density calculation.")
+functions{
+	// flatten_lower_tri: function that returns the lower-tri of a matrix, flattened to a vector
+	vector flatten_lower_tri(matrix mat) {
+		int n_cols = cols(mat);
+		int n_uniq = (n_cols * (n_cols - 1)) %/% 2;
+		vector[n_uniq] out ;
+		int i = 1;
+		for(c in 1:(n_cols-1)){
+			for(r in (c+1):n_cols){
+				out[i] = mat[r,c];
+				i += 1;
+			}
+		}
+		return(out) ;
+	}
+
+	// p_quick: probability of success via the "quick" function (threshold=where performance hits halfway between chance and lapse)
+	vector p_quick(int nX, vector x, vector p_chance, vector one_minus_p_chance, vector p_lapse, vector threshold, vector slope){
+		return(
+			p_chance
+			+ (
+				(one_minus_p_chance-p_lapse)
+				.* (
+					1-pow(2,-pow(x./threshold,slope))
+				)
+			)
+		) ;
+	}
+
+}
+
+
+generated quantities{
+
+	// iZq_r_vec: lower-tri of correlation matrix flattened to a vector
+	vector[(nXq21*(nXq21-1))%/%2] iZq_r_vec = flatten_lower_tri(multiply_lower_tri_self_transpose(iZq_cholcorr)) ;
+
+	// Slightly slower to define-then-use:
+	vector[rXq] threshold_for_subj_by_cond = sqrt(exp(rows_dot_product( iZq_mat[iXq,1:nXq] , Xq ))) ;
+	vector[rXq] slope_for_subj_by_cond = sqrt(exp(rows_dot_product( iZq_mat[iXq,(nXq+1):nXq2] , Xq ))) ;
+	vector[rXq] p_lapse_for_subj_by_cond = inv_logit(iZq_mat[,nXq21])[iXq] ;
+	vector[nY] p_success = p_quick(
+		nY
+		, intensity
+		, p_chance[yXq]
+		, one_minus_p_chance[yXq]
+		, p_lapse_for_subj_by_cond[yXq]
+		, threshold_for_subj_by_cond[yXq]
+		, slope_for_subj_by_cond[yXq]
+	) ;
+
+}
