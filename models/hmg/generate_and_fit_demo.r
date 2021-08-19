@@ -1,8 +1,8 @@
 # Glossary ----
 
 # n.b. the following employs a mix of snake_case and camelCase that is sure to
-#  vex many, but represents the author's best solution to the competing aims of
-#  clarity & brevity.
+#  vex some, but represents the author's best attempt to balance to the competing
+#  aims of clarity & brevity.
 
 # Y: observed outcome
 # nY: number of observed outcomes
@@ -641,3 +641,75 @@ post = aria::coda(post_path)
 	)
 )
 
+# fit with brms to compare sampling speed ----
+library(brms)
+system.time(
+	brms_post <- brm(
+		data = (
+			dat
+			%>% mutate(
+				id = factor(individual)
+			)
+		)
+		, family = gaussian()
+		, formula = value ~ G1*G2*C1*C2 + ( C1*C2 | id )
+		, prior = c(
+			prior(normal(0, 1), class = 'Intercept')
+			, prior(normal(0, 1), class = 'b')
+			, prior(weibull(2, 1), class = 'sigma')
+			, prior(lkj(1), class = 'cor')
+			, prior(normal(0, 1), class = 'sd')
+		)
+		, normalize = F
+		, iter = 2e3
+		, warmup = 1e3
+		, chains = 4
+		, cores = 4
+		, seed = 1
+		, backend = 'cmdstanr'
+	)
+)
+
+# check nuts diagnostics
+(
+	brms_post
+	%>% brms::nuts_params()
+	%>% pivot_wider(
+		names_from = Parameter
+		, values_from = Value
+	)
+	%>% group_by(Chain)
+	%>% summarise(
+		max_treedepth = max(treedepth__)
+		, num_divergent = sum(divergent__)
+		, rebfmi = var(energy__)/(sum(diff(energy__)^2)/n()) #n.b. reciprocal of typical EBFMI, so bigger=bad, like rhat
+	)
+)
+
+# gather summary for core parameters (inc. r̂ & ess)
+(
+	brms_post
+	%>% posterior_samples(add_chain=T)
+	%>% rename(.chain=chain,.iteration=iter)
+	%>% posterior::summarise_draws(.cores=parallel::detectCores())
+) ->
+	brms_par_summary
+
+# show the ranges of r̂/ess's
+(
+	brms_par_summary
+	%>% select(rhat,contains('ess'))
+	%>% summary()
+)
+
+#View those with suspect r̂
+(
+	brms_par_summary
+	%>% filter(rhat>1.01)
+	%>% (function(suspects){
+		if(nrow(suspects)>1){
+			View(suspects)
+		}
+		return(paste('# suspect parameters:',nrow(suspects)))
+	})()
+)
