@@ -56,8 +56,8 @@ set.seed(1) # change this to make different data
 # parameters you can play with
 nG_vars = 2 # number of 2-level variables manipulated as crossed and across individuals, must be an integer >0
 nC_vars = 2 # number of 2-level variables manipulated as crossed and within each individual, must be an integer >0
-nI_per_group = 1e2 # number of individuals, must be an integer >1
-nY_per_ic = 1e2 # number of observations per individual/condition combo, must be an integer >1
+nI_per_group = 3 # number of individuals, must be an integer >1
+nY_per_ic = 3 # number of observations per individual/condition combo, must be an integer >1
 # the latter two combine to determine whether centered or non-centered will sample better
 
 
@@ -382,7 +382,7 @@ mod_path = fs::dir_ls(
 
 # set the model centered/non-centeredness
 #  generally, if *either* nI_per_group *or* num_Y_per_ic is small, non-centered will sample better than centered
-data_for_stan$centered = TRUE
+data_for_stan$centered = F
 
 # conversion to 1/0 for stan
 data_for_stan$centered = as.numeric(data_for_stan$centered)
@@ -403,7 +403,7 @@ data_for_stan$centered = as.numeric(data_for_stan$centered)
 ) -> post_path
 
 # ensure model is compiled
-aria:::check_syntax_and_maybe_compile(mod_path)
+aria:::check_and_compile(mod_path,block=T)
 
 # compose
 aria::compose(
@@ -411,6 +411,7 @@ aria::compose(
 	, code_path = mod_path
 	, out_path = post_path
 	, overwrite = T
+	, block = T
 )
 
 # how long did it take?
@@ -643,68 +644,86 @@ post = aria::coda(post_path)
 
 # fit with brms to compare sampling speed ----
 library(brms)
-system.time(
-	brms_post <- brm(
-		data = (
-			dat
-			%>% mutate(
-				id = factor(individual)
-			)
-		)
-		, family = gaussian()
-		, formula = value ~ G1*G2*C1*C2 + ( C1*C2 | id )
-		, prior = c(
-			prior(normal(0, 1), class = 'Intercept')
-			, prior(normal(0, 1), class = 'b')
-			, prior(weibull(2, 1), class = 'sigma')
-			, prior(lkj(1), class = 'cor')
-			, prior(normal(0, 1), class = 'sd')
-		)
-		, normalize = F
-		, iter = 2e3
-		, warmup = 1e3
-		, chains = 4
-		, cores = 4
-		, seed = 1
-		, backend = 'cmdstanr'
-	)
+brms_data = mutate(dat,id = factor(individual))
+brms_formula = bf(
+	formula = value ~ G1*G2*C1*C2 + ( C1*C2 | id )
+	, family = gaussian()
+)
+brms_prior = c(
+	prior(normal(0, 1), class = 'Intercept')
+	, prior(normal(0, 1), class = 'b')
+	, prior(weibull(2, 1), class = 'sigma')
+	, prior(lkj(1), class = 'cor')
+	, prior(normal(0, 1), class = 'sd')
+)
+brms_standata = make_standata(
+	data = brms_data
+	, formula = brms_formula
+)
+attr(brms_standata,'class') = NULL
+brms_stancode = make_stancode(
+	data = brms_data
+	, formula = brms_formula
+	, prior = brms_prior
+	, normalize = F
+)
+brms_code_path = 'brms/brms_hmg.stan'
+# write( brms_stancode, file = brms_code_path ) #commented-out bc after initial write I edited the file a bit
+
+# ensure model is compiled
+aria:::check_and_compile(
+	brms_code_path
+	, compile_debug = F
+	, run_debug = F
+	, block = T
 )
 
-# check nuts diagnostics
+# compose
+brms_post_path = 'posteriors/brms.netcdf4'
+aria::compose(
+	data = brms_standata
+	, code_path = brms_code_path
+	, out_path = brms_post_path
+	, overwrite = T
+	, block = T
+)
+
+# how long did it take?
+aria::marginalia()$time
+
+
+# check posterior diagnostics ----
+post = aria::coda(brms_post_path)
+
+# Check treedepth, divergences, & rebfmi
 (
-	brms_post
-	%>% brms::nuts_params()
-	%>% pivot_wider(
-		names_from = Parameter
-		, values_from = Value
-	)
-	%>% group_by(Chain)
+	post$draws(group='sample_stats')
+	%>% posterior::as_draws_df()
+	%>% group_by(.chain)
 	%>% summarise(
-		max_treedepth = max(treedepth__)
-		, num_divergent = sum(divergent__)
-		, rebfmi = var(energy__)/(sum(diff(energy__)^2)/n()) #n.b. reciprocal of typical EBFMI, so bigger=bad, like rhat
+		max_treedepth = max(treedepth)
+		, num_divergent = sum(divergent)
+		, rebfmi = var(energy)/(sum(diff(energy)^2)/n()) # n.b. reciprocal of typical EBFMI, so bigger=bad, like rhat
 	)
 )
 
 # gather summary for core parameters (inc. r̂ & ess)
 (
-	brms_post
-	%>% posterior_samples(add_chain=T)
-	%>% rename(.chain=chain,.iteration=iter)
+	post$draws(group='parameters')
 	%>% posterior::summarise_draws(.cores=parallel::detectCores())
 ) ->
-	brms_par_summary
+	par_summary
 
 # show the ranges of r̂/ess's
 (
-	brms_par_summary
+	par_summary
 	%>% select(rhat,contains('ess'))
 	%>% summary()
 )
 
-#View those with suspect r̂
+# View those with suspect r̂
 (
-	brms_par_summary
+	par_summary
 	%>% filter(rhat>1.01)
 	%>% (function(suspects){
 		if(nrow(suspects)>1){
@@ -713,3 +732,4 @@ system.time(
 		return(paste('# suspect parameters:',nrow(suspects)))
 	})()
 )
+
