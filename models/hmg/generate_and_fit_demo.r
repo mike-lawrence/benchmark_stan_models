@@ -96,7 +96,6 @@ for(this_nXc in 1:nXc){
 			%>% as_tibble(
 				.name_repair = function(x) paste0('iZc[.,',1:length(x),']')
 			)
-			%>% rename()
 			%>% mutate(
 				g = this_nXg
 				, individual = paste(g,1:n(),sep='_') # important that individuals have unique identifiers across groups

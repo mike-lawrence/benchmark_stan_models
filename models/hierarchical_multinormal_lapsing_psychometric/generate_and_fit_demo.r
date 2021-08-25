@@ -1,8 +1,8 @@
 # Glossary ----
 
 # n.b. the following employs a mix of snake_case and camelCase that is sure to
-#  vex many, but represents the author's best solution to the competing aims of
-#  clarity & brevity.
+#  vex some, but represents the author's best attempt to balance to the competing
+#  aims of clarity & brevity.
 
 # Y: observed outcome
 # nY: number of observed outcomes
@@ -98,7 +98,6 @@ for(this_nXc21 in 1:nXc21){
 			%>% as_tibble(
 				.name_repair = function(x) paste0('iZc[.,',1:length(x),']')
 			)
-			%>% rename()
 			%>% mutate(
 				g = this_nXg
 				, individual = paste(g,1:n(),sep='_') # important that individuals have unique identifiers across groups
@@ -421,7 +420,7 @@ data_for_stan$centered = as.numeric(data_for_stan$centered)
 ) -> post_path
 
 # ensure model is compiled
-aria:::check_syntax_and_maybe_compile(mod_path)
+aria:::check_and_compile(mod_path,block=T)
 
 # compose
 aria::compose(
@@ -429,6 +428,7 @@ aria::compose(
 	, code_path = mod_path
 	, out_path = post_path
 	, overwrite = T
+	, block = T
 )
 
 # how long did it take?

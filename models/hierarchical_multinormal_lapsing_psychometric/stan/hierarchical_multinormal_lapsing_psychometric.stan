@@ -6,8 +6,8 @@
 ////
 
 // n.b. the following employs a mix of snake_case and camelCase that is sure to
-//  vex many, but represents the author's best solution to the competing aims of
-//  clarity & brevity.
+//  vex some, but represents the author's best attempt to balance to the competing
+//  aims of clarity & brevity.
 
 // Y: observed outcome
 // nY: number of observed outcomes
