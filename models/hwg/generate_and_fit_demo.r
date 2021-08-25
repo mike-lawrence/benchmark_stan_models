@@ -1,14 +1,34 @@
+# Glossary ----
+
+# n.b. the following employs a mix of snake_case and camelCase that is sure to
+#  vex some, but represents the author's best attempt to balance to the competing
+#  aims of clarity & brevity.
+
+# Y: observed outcome
+# nY: number of observed outcomes
+# X: predictor/contrast matrix
+# nX: number of predictors (columns in the contrast matrix)
+# rX: number of rows in the contrast matrix X
+# (i)ndividual: a unit of observation within which correlated measurements may take place
+# (c)ondition: a labelled set of observations within an individual that share some feature/predictor or conjunction of features/predictors
+# Xc: condition-level contrast matrix
+# nXc: number of predictors in the condition-level contrast matrix
+# rXc: number of rows in the condition-level contrast matrix
+# yXc: for each observation in y, an index indicating the associated row in Xc corresponding to that observation's individual/condition combo
+# Z: matrix of coefficient row-vectors to be dot-product'd with a contrast matrix
+# iZc: matrix of coefficient row-vectors associated with each individual
+
 # Preamble (options, installs, imports & custom functions) ----
 
-options(warn=1) #really should be default in R
-`%!in%` = Negate(`%in%`) #should be in base R!
+options(warn=1) # really should be default in R
+`%!in%` = Negate(`%in%`) # should be in base R!
 
 # specify the packages used:
 required_packages = c(
 	'github.com/rmcelreath/rethinking' # for rlkjcorr & rmvrnom2
-	, 'github.com/stan-dev/cmdstanr' #for Stan stuff
+	, 'github.com/stan-dev/cmdstanr' # for Stan stuff
 	, 'github.com/mike-lawrence/aria/aria' # for aria
-	, 'tidyverse' #for all that is good and holy
+	, 'tidyverse' # for all that is good and holy
 )
 
 # load the helper functions:
@@ -17,7 +37,7 @@ for(file in fs::dir_ls('r')){
 	source(file)
 }
 
-#install any required packages not already present
+# install any required packages not already present
 install_if_missing(required_packages)
 
 # load tidyverse & aria
@@ -25,114 +45,105 @@ library(tidyverse)
 library(aria)
 
 # Simulate data ----
-set.seed(1) #change this to make different data
+set.seed(1) # change this to make different data
 
-#setting the data simulation parameters
-sim_pars = lst(
+# setting the data simulation parameters
 
-	#parameters you can play with
-	num_subj = 30 #number of subjects, must be an integer >1
-	, num_vars = 4 #number of 2-level variables manipulated as crossed and within each subject, must be an integer >0
-	, num_trials = 100 #number of trials per subject/condition combo, must be an integer >1
+# parameters you can play with
+nC_vars = 2 # number of 2-level variables manipulated as crossed and within each individual, must be an integer >0
+nI = 30 # number of individuals, must be an integer >1
+nY_per_ic = 30 # number of observations per individual/condition combo, must be an integer >1
+# the latter two combine to determine whether centered or non-centered will sample better
 
-	#the rest of these you shouldn't touch
-	, num_coef = 2^(num_vars)
-	, mu = rnorm(num_coef)
-	, sigma = rweibull(num_coef,2,1)
-	, r_mat = rethinking::rlkjcorr(1,num_coef,eta=1)
-	, noise = rweibull(1,2,1)
 
-	, r = r_mat[lower.tri(r_mat)]
-)
+# the rest of these you shouldn't touch
+nXc = 2^(nC_vars)
+Zc = rnorm(nXc)
+iZc_sd = rweibull(nXc,2,1)
+iZc_r_mat = rethinking::rlkjcorr(1,nXc,eta=1)
+Y_sd = rweibull(1,2,1)
+iZc_r_vec = iZc_r_mat[lower.tri(iZc_r_mat)]
 
-#compute the contrast matrix
-contrast_matrix =
-	(
-		1:sim_pars$num_vars
-		%>% map(.f=function(x){
-			factor(c('lo','hi'))
-		})
-		%>% (function(x){
-			names(x) = paste0('v',1:sim_pars$num_vars)
-			return(x)
-		})
-		%>% cross_df()
-		%>% (function(x){
-			get_contrast_matrix(
-				data = x
-				, formula = as.formula(paste('~',paste0('v',1:sim_pars$num_vars,collapse='*')))
-				, contrast_kind = halfsum_contrasts
-			)
-		})
+
+# compute iZc
+(
+	rethinking::rmvnorm2(
+		n = nI
+		, Mu = Zc
+		, sigma = iZc_sd
+		, Rho = iZc_r_mat
 	)
-
-#get coefficients for each subject
-subj_coef =
-	(
-		#subj coefs as mvn
-		rethinking::rmvnorm2(
-			n = sim_pars$num_subj
-			, Mu = sim_pars$mu
-			, sigma = sim_pars$sigma
-			, Rho = sim_pars$r_mat
-		)
-		#add names to columns
-		%>% (function(x){
-			dimnames(x)=list(NULL,paste0('X',1:ncol(x)))
-			return(x)
-		})
-		#make a tibble
-		%>% as_tibble(.name_repair='unique')
-		#add subject identifier column
-		%>% mutate(
-			subj = 1:sim_pars$num_subj
-		)
+	%>% as_tibble(
+		.name_repair = function(x) paste0('iZc[.,',1:length(x),']')
 	)
-
-# get condition means implied by subject coefficients and contrast matrix
-subj_cond =
-	(
-		subj_coef
-		%>% group_by(subj)
-		%>% summarise(
-			(function(x){
-				out = attr(contrast_matrix,'data')
-				out$cond_mean = as.vector(contrast_matrix %*% t(x))
-				return(out)
-			})(cur_data())
-			, .groups = 'drop'
-		)
+	%>% mutate(
+		individual = 1:n()
 	)
+) ->
+	iZc
 
-# get noisy measurements in each condition for each subject
-dat =
-	(
-		subj_cond
-		%>% expand_grid(trial = 1:sim_pars$num_trials)
-		%>% mutate(
-			obs = rnorm(n(),cond_mean,sim_pars$noise)
-		)
-		%>% select(-cond_mean)
+# compute Xc
+uXc = sim_contrasts(nC_vars,'C')
+
+# compute iZc_dot_Xc
+(
+	iZc
+	%>% group_by(individual)
+	%>% summarise(
+		{function(x){
+			x = t(as.matrix(select(x,starts_with('iZc')),))
+			this_dot = rep(NA,nXc)
+			for(this_nXc in 1:nXc){
+				this_dot[this_nXc] = uXc[this_nXc,] %*% x
+			}
+			tibble(c=1:nXc,value=this_dot)
+		}}(cur_data())
+		, .groups = 'keep'
 	)
+) ->
+	iZc_dot_Xc
 
+# compute Y
+(
+	iZc_dot_Xc
+	%>% group_by(c,.add=T)
+	%>% summarise(
+		value = rnorm(nY_per_ic,value,Y_sd)
+		, .groups = 'keep'
+	)
+) ->
+	Y
 
-# Compute inputs to Stan model ----
+# join with group & condition columns
+(
+	Y
+	%>% left_join((
+		attr(uXc,'data')
+		%>% mutate(c=1:n())
+	))
+	%>% ungroup()
+	%>% select(everything(),-c,-value,value)
+) ->
+	dat
 
-#if there's no missing data (as in this synthetic example), we could proceed with modelling,
+# dat is now what one would typically have as collected data
+dat
+
+# if there's no missing data (as in this synthetic example), we could proceed with modelling,
 #  but to demonstrate how to handle missing data, we'll do a bit of extra work:
 
-#Uncomment next section to induce data-missingness (causes some Ss to be missing whole conditions)
+# Uncomment next section to induce data-missingness (causes some Ss to be missing whole conditions)
 # (
 # 	dat
-# 	#first collapse to subject-by-condition stats
-# 	%>% group_by(
-# 		across(c(
-# 			-obs
-# 			, -trial
-# 		))
-# 	)
-# 	%>% summarise()
-# 	%>% slice_sample(prop=.9)
+# 	# select all but value
+# 	%>% select(-value)
+# 	# get distinct rows (no more individual trials)
+# 	%>% distinct()
+# 	# group by individual
+# 	%>% group_by(individual)
+# 	# toss one condition
+# 	%>% slice_sample(n=(nXc-1))
+# 	# semi-join to keep all in dat that have been kept above
 # 	%>% semi_join(
 # 		x = dat
 # 		, y = .
@@ -140,97 +151,165 @@ dat =
 # ) ->
 # 	dat
 
+nrow(dat)
+
+# Compute inputs to Stan model ----
+
+# Some data prep
 (
 	dat
-	#add the contrast matrix columns
+	# ungroup (necessary)
+	%>% ungroup()
+	# ensure individual is a sequential numeric
+	%>% mutate(
+		individual = as.numeric(factor(individual))
+	)
+	# arrange rows by individual
+	%>% arrange(individual)
+) ->
+	dat
+
+# compute complete_Xc from distinct combinations of individuals & conditions
+(
+	dat
+	# select individual & any condition-defining columns
+	%>% select(individual,starts_with('C'))
+	# collapse down to distinct rows (1 per individual/conditions combo)
+	%>% distinct()
+	# expand (in case there's any missing data; doesn't hurt if not)
+	# %>% exec(expand_grid,!!!.)
+	%>% as.list()
+	%>% map(unique)
+	%>% cross_df()
+	# arrange (not really necessary, but why not)
+	%>% arrange()
+	# add the contrast matrix columns
 	%>% mutate(
 		contrasts = get_contrast_matrix_rows_as_list(
 			data = .
-			# the following compilcated specification of the formula is a by-product of making this example
-			# work for any value for sim_pars$num_vars; normally you would do something like this
+			# the following complicated specification of the formula is a by-product of making this example
+			# work for any number of variables =  normally you would do something like this
 			# (for 2 variables for example):
-			# formula = ~ v1*v2
-			, formula = as.formula(paste0('~',paste0('v',1:sim_pars$num_vars,collapse='*')))
+			# formula = ~ C1*C2
+			, formula = as.formula(paste0('~',paste0('C',1:nC_vars,collapse='*')))
 			# half-sum contrasts are nice for 2-level variables bc they yield parameters whose value
 			# is the difference between conditions
 			, contrast_kind = halfsum_contrasts
 		)
 	)
 ) ->
-	dat_with_contrasts
+	complete_Xc_with_vars
 
-
-#We need a tbl containing the combinations of the unique contrasts and subjects
-
-#first get the unique contrasts (will serve as input to Stan)
+# show the unique contrasts
 (
-	dat_with_contrasts
-	%>% distinct(contrasts)
-	%>% arrange(contrasts) #important
-) ->
-	unique_contrasts
-
-#now cross with unique subjects
-(
-	unique_contrasts
-	%>% expand_grid(
-		tibble(subj = unique(dat$subj))
-	)
-	%>% arrange(contrasts, subj) #important
-	# add a column containing the row index
-	%>% mutate(
-		row = 1:n()
-	)
-	#join with dat_summary
-	%>% right_join(
-		dat_with_contrasts
-		, by = c('contrasts','subj')
-	)
-) -> dat_with_contrasts_and_row
-
-#now get the unique contrast matrix
-(
-	unique_contrasts
+	complete_Xc_with_vars
+	%>% select(-individual)
+	%>% distinct()
 	%>% unnest(contrasts)
-	%>% as.matrix()
-) -> uw
+)
+
+# subset down to just those individual-condition combos actually present in the data
+#  it's ok if there's no missing data and nrow(complete_Xc_with_vars)==nrow(Xc_with_vars)
+(
+	complete_Xc_with_vars
+	%>% semi_join(dat)
+) ->
+	Xc_with_vars
+
+
+# join Xc with dat to label observations with corresponding row from Xc
+(
+	Xc_with_vars
+	# add row identifier
+	%>% mutate(Xc_row=1:n())
+	# right-join with dat to preserve dat's row order
+	%>% right_join(
+		mutate(dat,dat_row=1:n())
+	)
+	%>% arrange(dat_row)
+	# pull the Xc row identifier
+	%>% pull(Xc_row)
+) ->
+	yXc
 
 
 # package for stan & sample ----
 
-data_for_stan = lst( #lst permits later entries to refer to earlier entries
+data_for_stan = lst( # lst permits later entries to refer to earlier entries
 
-	####
+	# # # #
 	# Entries we need to specify ourselves
-	####
+	# # # #
 
-	# uw: unique within predictor matrix
-	uw = uw
 
-	# y: observations
-	, y = dat_with_contrasts_and_row$obs
+	# Xc: condition-level predictor matrix
+	Xc = (
+		Xc_with_vars
+		%>% select(contrasts)
+		%>% unnest(contrasts)
+		%>% as.matrix()
+	)
 
-	, row = dat_with_contrasts_and_row$row
+	# iXc: which individual is associated with each row in Xc
+	, iXc = as.numeric(factor(Xc_with_vars$individual))
 
-	####
+	# Y: observations
+	, Y = dat$value
+
+	# yXc: which row in Xc is associated with each observation in Y
+	, yXc = yXc
+
+	# # # #
 	# Entries computable from the above
-	####
+	# # # #
 
-	, k = ncol(uw)
-	, n = length(unique(dat_with_contrasts_and_row$subj))
-	, m = length(row) # should be n*k, unless missing data
+	# nI: number of individuals
+	, nI = max(iXc)
+
+	# nXc: number of cols in the condition-level predictor matrix
+	, nXc = ncol(Xc)
+
+	# rXc: number of rows in the condition-level predictor matrix
+	, rXc = nrow(Xc)
+
+	# nY: num entries in the observation vectors
+	, nY = length(Y)
 
 )
 
 # double-check:
 glimpse(data_for_stan)
 
-#set the model and posterior paths
-mod_path = 'stan/hwg_nc.stan'
-post_path = 'nc/hwg_nc.nc'
+# set the model path (automated bc in this repo there's only one)
+mod_path = fs::dir_ls(
+	path = 'stan'
+	, glob = '*.stan'
+)
+
+# set the model centered/non-centeredness
+#  generally, if *either* nI_per_group *or* num_Y_per_ic is small, non-centered will sample better than centered
+data_for_stan$centered = F
+
+# conversion to 1/0 for stan
+data_for_stan$centered = as.numeric(data_for_stan$centered)
+
+# set the posterior path (automated but you could do your own if you had multiple models)
+(
+	mod_path
+	%>% fs::path_file()
+	%>% fs::path_ext_remove()
+	%>% paste0(
+		ifelse(data_for_stan$centered,'_c','_nc')
+	)
+	%>% fs::path(
+		'posteriors'
+		, .
+		, ext = 'netcdf4'
+	)
+) -> post_path
 
 # ensure model is compiled
-aria:::check_syntax_and_maybe_compile(mod_path)
+aria::check_and_compile(mod_path,block=T)
 
 # compose
 aria::compose(
@@ -238,7 +317,12 @@ aria::compose(
 	, code_path = mod_path
 	, out_path = post_path
 	, overwrite = T
+	, block = T
 )
+
+# how long did it take?
+aria::marginalia()$time
+
 
 # check posterior diagnostics ----
 post = aria::coda(post_path)
@@ -251,19 +335,13 @@ post = aria::coda(post_path)
 	%>% summarise(
 		max_treedepth = max(treedepth)
 		, num_divergent = sum(divergent)
-		, rebfmi = var(energy)/(sum(diff(energy)^2)/n()) #n.b. reciprocal of typical EBFMI, so bigger=bad, like rhat
+		, rebfmi = var(energy)/(sum(diff(energy)^2)/n()) # n.b. reciprocal of typical EBFMI, so bigger=bad, like rhat
 	)
 )
 
 # gather summary for core parameters (inc. r̂ & ess)
 (
-	case_when(
-		str_detect(mod_path,'_nc')
-		~ c('mu','sigma','r','z_')
-		, T
-		~ c('mu','sigma','r','z')
-	)
-	%>% post$draws()
+	post$draws(group='parameters')
 	%>% posterior::summarise_draws(.cores=parallel::detectCores())
 ) ->
 	par_summary
@@ -275,16 +353,21 @@ post = aria::coda(post_path)
 	%>% summary()
 )
 
-#View those with suspect r̂
+# View those with suspect r̂
 (
 	par_summary
 	%>% filter(rhat>1.01)
-	%>% View()
+	%>% (function(suspects){
+		if(nrow(suspects)>1){
+			View(suspects)
+		}
+		return(paste('# suspect parameters:',nrow(suspects)))
+	})()
 )
 
 # Viz recovery of non-correlation parameters ----
 (
-	post$draws(variables=c('noise','mu','sigma'))
+	post$draws(variables=c('Y_sd','Zc','iZc_sd'))
 	%>% posterior::as_draws_df()
 	%>% select(-.draw)
 	%>% pivot_longer(
@@ -294,16 +377,16 @@ post = aria::coda(post_path)
 	%>% left_join(
 		bind_rows(
 			tibble(
-				true = sim_pars$noise
-				, variable = 'noise'
+				true = Y_sd
+				, variable = 'Y_sd'
 			)
 			, tibble(
-				true = sim_pars$mu
-				, variable = paste0('mu[',1:length(true),']')
+				true = Zc
+				, variable = paste0('Zc[',1:length(true),']')
 			)
 			, tibble(
-				true = sim_pars$sigma
-				, variable = paste0('sigma[',1:length(true),']')
+				true = iZc_sd
+				, variable = paste0('iZc_sd[',1:length(true),']')
 			)
 		)
 	)
@@ -316,7 +399,7 @@ post = aria::coda(post_path)
 		, as_tibble(t(posterior::quantile2(value,c(.05,.25,.5,.75,.95))))
 		, true = true[1]
 	)
-	%>% mutate(variable = factor_1d(variable))
+	# %>% mutate(variable = factor_1d(variable))
 	%>% ggplot()
 	+ geom_hline(yintercept = 0)
 	+ geom_linerange(
@@ -374,9 +457,10 @@ post = aria::coda(post_path)
 )
 
 
+
 # Viz recovery of correlations ----
 (
-	post$draws(variables='r')
+	post$draws(variables='iZc_r_vec')
 	%>% posterior::as_draws_df()
 	%>% select(-.draw)
 	%>% pivot_longer(
@@ -385,10 +469,10 @@ post = aria::coda(post_path)
 	)
 	%>% left_join(
 		tibble(
-			true = sim_pars$r_mat[lower.tri(sim_pars$r_mat)]
+			true = iZc_r_vec
 			, variable = case_when(
 				length(true)==1 ~ 'r'
-				, T ~ paste0('r[',1:length(true),']')
+				, T ~ paste0('iZc_r_vec[',1:length(true),']')
 			)
 		)
 	)
@@ -457,3 +541,95 @@ post = aria::coda(post_path)
 		, fill = 'Rhat'
 	)
 )
+
+# fit with brms to compare sampling speed ----
+library(brms)
+brms_data = mutate(dat,id = factor(individual))
+brms_formula = bf(
+	formula = value ~ C1*C2 + ( C1*C2 | id )
+	, family = gaussian()
+)
+brms_prior = c(
+	prior(normal(0, 1), class = 'Intercept')
+	, prior(normal(0, 1), class = 'b')
+	, prior(weibull(2, 1), class = 'sigma')
+	, prior(lkj(1), class = 'cor')
+	, prior(normal(0, 1), class = 'sd')
+)
+brms_standata = make_standata(
+	data = brms_data
+	, formula = brms_formula
+)
+attr(brms_standata,'class') = NULL
+brms_stancode = make_stancode(
+	data = brms_data
+	, formula = brms_formula
+	, prior = brms_prior
+	, normalize = F
+)
+brms_code_path = 'brms/brms_hwg.stan'
+write( brms_stancode, file = brms_code_path ) #commented-out bc after initial write I edited the file a bit
+
+# ensure model is compiled
+aria:::check_and_compile(
+	brms_code_path
+	, compile_debug = F
+	, run_debug = F
+	, block = T
+)
+
+# compose
+brms_post_path = 'posteriors/brms.netcdf4'
+aria::compose(
+	data = brms_standata
+	, code_path = brms_code_path
+	, out_path = brms_post_path
+	, overwrite = T
+	, block = T
+)
+
+# how long did it take?
+aria::marginalia()$time
+
+
+# check posterior diagnostics ----
+post = aria::coda(brms_post_path)
+
+# Check treedepth, divergences, & rebfmi
+(
+	post$draws(group='sample_stats')
+	%>% posterior::as_draws_df()
+	%>% group_by(.chain)
+	%>% summarise(
+		max_treedepth = max(treedepth)
+		, num_divergent = sum(divergent)
+		, rebfmi = var(energy)/(sum(diff(energy)^2)/n()) # n.b. reciprocal of typical EBFMI, so bigger=bad, like rhat
+	)
+)
+
+# gather summary for core parameters (inc. r̂ & ess)
+(
+	post$draws(group='parameters')
+	%>% posterior::summarise_draws(.cores=parallel::detectCores())
+) ->
+	par_summary
+
+# show the ranges of r̂/ess's
+(
+	par_summary
+	%>% select(rhat,contains('ess'))
+	%>% summary()
+)
+
+# View those with suspect r̂
+(
+	par_summary
+	%>% filter(rhat>1.01)
+	%>% (function(suspects){
+		if(nrow(suspects)>1){
+			View(suspects)
+		}
+		return(paste('# suspect parameters:',nrow(suspects)))
+	})()
+)
+

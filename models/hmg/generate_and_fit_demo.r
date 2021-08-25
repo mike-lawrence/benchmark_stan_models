@@ -393,7 +393,7 @@ data_for_stan$centered = as.numeric(data_for_stan$centered)
 	%>% fs::path_file()
 	%>% fs::path_ext_remove()
 	%>% paste0(
-		ifelse(data_for_stan$centered,'_c2','_nc')
+		ifelse(data_for_stan$centered,'_c','_nc')
 	)
 	%>% fs::path(
 		'posteriors'
