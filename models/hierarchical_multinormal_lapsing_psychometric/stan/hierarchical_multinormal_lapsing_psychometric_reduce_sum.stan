@@ -1,5 +1,5 @@
 //aria: compile=1
-//aria: syntax_ignore = "has no priors"
+//aria: syntax_ignore = c("has no priors","The variable partial_lupmf may not have been assigned a value before its use.")
 
 ////
 // Glossary
@@ -49,6 +49,32 @@ functions{
 		) ;
 	}
 
+	real partial_lpmf(
+		int[] Y_slice
+		, int start
+		, int end
+		, vector intensity
+		, vector p_chance
+		, vector one_minus_p_chance
+		, vector p_lapse
+		, vector threshold
+		, vector slope
+	){
+		return(
+			bernoulli_lupmf(
+				Y_slice
+				|
+			 	p_quick(
+					intensity[start:end] // data variable
+					, p_chance[start:end] // data variable
+					, one_minus_p_chance[start:end] // data variable
+					, threshold[start:end] // threshold (parameter variable)
+					, slope[start:end] //slope (parameter variable)
+					, p_lapse[start:end] // p_lapse (parameter variable)
+				)
+			)
+		) ;
+	}
 }
 
 data{
@@ -229,15 +255,17 @@ model{
 	////
 	// observation-level structure
 	////
-	Y ~ bernoulli(
-	 	p_quick(
-	 		intensity // data variable
-			, p_chance // data variable
-			, one_minus_p_chance // data variable
-			, sqrt(exp(rows_dot_product( iZc_mat[iXc,1:nXc] , Xc )))[yXc] // threshold (parameter variable)
-			, sqrt(exp(rows_dot_product( iZc_mat[iXc,(nXc+1):nXc2] , Xc )))[yXc] //slope (parameter variable)
-			, inv_logit(iZc_mat[,nXc21])[iXc][yXc] // p_lapse (parameter variable)
-		)
+
+	target += reduce_sum(
+		partial_lupmf // n.b. U in name!!
+		, Y
+		, 1 //grainsize (1=auto)
+		, intensity
+		, p_chance
+		, one_minus_p_chance
+		, sqrt(exp(rows_dot_product( iZc_mat[iXc,1:nXc] , Xc )))[yXc] //threshold
+		, sqrt(exp(rows_dot_product( iZc_mat[iXc,(nXc+1):nXc2] , Xc )))[yXc] //slope
+		, inv_logit(iZc_mat[,nXc21])[iXc][yXc] //p_lapse
 	) ;
 
 }
