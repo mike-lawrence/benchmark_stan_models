@@ -54,10 +54,10 @@ set.seed(1) # change this to make different data
 # setting the data simulation parameters
 
 # parameters you can play with
-nG_vars = 2 # number of 2-level variables manipulated as crossed and across individuals, must be an integer >0
+nG_vars = 1 # number of 2-level variables manipulated as crossed and across individuals, must be an integer >0
 nC_vars = 2 # number of 2-level variables manipulated as crossed and within each individual, must be an integer >0
 nI_per_group = 3 # number of individuals, must be an integer >1
-nY_per_ic = 3 # number of observations per individual/condition combo, must be an integer >1
+nY_per_ic = 4 # number of observations per individual/condition combo, must be an integer >1
 # the latter two combine to determine whether centered or non-centered will sample better
 
 
@@ -253,7 +253,7 @@ nrow(dat)
 	# collapse down to distinct rows (1 per individual/conditions combo)
 	%>% distinct()
 	# expand (in case there's any missing data; doesn't hurt if not)
-	# %>% exec(expand_grid,!!!.)
+	# %>% exec(expand_grid,!!!.) #should work, but doesn't, so need the next three instead
 	%>% as.list()
 	%>% map(unique)
 	%>% cross_df()
@@ -467,6 +467,15 @@ post = aria::coda(post_path)
 		cols = -c(.chain,.iteration)
 		, names_to = 'variable'
 	)
+	%>% group_by(variable)
+	%>% arrange(variable,.chain,.iteration)
+	%>% summarise(
+		rhat = 1.01<posterior::rhat(matrix(value,ncol=length(unique(.chain))))
+		, ess_bulk = 100>posterior::ess_bulk(matrix(value,ncol=length(unique(.chain))))
+		, ess_tail = 100>posterior::ess_tail(matrix(value,ncol=length(unique(.chain))))
+		, as_tibble(t(posterior::quantile2(value,c(.05,.25,.5,.75,.95))))
+	)
+	#add true values
 	%>% left_join(
 		bind_rows(
 			tibble(
@@ -474,12 +483,12 @@ post = aria::coda(post_path)
 				, variable = 'Y_sd'
 			)
 			, tibble(
-				true = as.vector(t(Z))
+				true = as.vector(Z)
 				, variable = paste0(
 					'Z['
-					,rep(1:nXc,times=nXg)
+					,rep(1:nXg,times=nXc)
 					,','
-					,rep(1:nXg,each=nXc)
+					,rep(1:nXc,each=nXg)
 					,']'
 				)
 			)
@@ -489,16 +498,6 @@ post = aria::coda(post_path)
 			)
 		)
 	)
-	%>% group_by(variable)
-	%>% arrange(variable,.chain,.iteration)
-	%>% summarise(
-		rhat = 1.01<posterior::rhat(matrix(value,ncol=length(unique(.chain))))
-		, ess_bulk = 100>posterior::ess_bulk(matrix(value,ncol=length(unique(.chain))))
-		, ess_tail = 100>posterior::ess_tail(matrix(value,ncol=length(unique(.chain))))
-		, as_tibble(t(posterior::quantile2(value,c(.05,.25,.5,.75,.95))))
-		, true = true[1]
-	)
-	# %>% mutate(variable = factor_1d(variable))
 	%>% ggplot()
 	+ geom_hline(yintercept = 0)
 	+ geom_linerange(
@@ -566,6 +565,15 @@ post = aria::coda(post_path)
 		cols = -c(.chain,.iteration)
 		, names_to = 'variable'
 	)
+	%>% group_by(variable)
+	%>% arrange(variable,.chain,.iteration)
+	%>% summarise(
+		rhat = 1.01<posterior::rhat(matrix(value,ncol=length(unique(.chain))))
+		, ess_bulk = 100>posterior::ess_bulk(matrix(value,ncol=length(unique(.chain))))
+		, ess_tail = 100>posterior::ess_tail(matrix(value,ncol=length(unique(.chain))))
+		, as_tibble(t(posterior::quantile2(value,c(.05,.25,.5,.75,.95))))
+	)
+	#add true values
 	%>% left_join(
 		tibble(
 			true = iZc_r_vec
@@ -574,15 +582,6 @@ post = aria::coda(post_path)
 				, T ~ paste0('iZc_r_vec[',1:length(true),']')
 			)
 		)
-	)
-	%>% group_by(variable)
-	%>% arrange(variable,.chain,.iteration)
-	%>% summarise(
-		rhat = 1.01<posterior::rhat(matrix(value,ncol=length(unique(.chain))))
-		, ess_bulk = 100>posterior::ess_bulk(matrix(value,ncol=length(unique(.chain))))
-		, ess_tail = 100>posterior::ess_tail(matrix(value,ncol=length(unique(.chain))))
-		, as_tibble(t(posterior::quantile2(value,c(.05,.25,.5,.75,.95))))
-		, true = true[1]
 	)
 	%>% mutate(variable = factor_1d(variable))
 	%>% ggplot()

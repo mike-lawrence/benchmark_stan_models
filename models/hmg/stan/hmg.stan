@@ -1,5 +1,7 @@
 //aria: compile=1
-//aria: syntax_ignore = "has no priors"
+//aria: syntax_ignore = c("has no priors","was declared but was not used in the density calculation.")
+//aria: cxx_flags = c("-O3","-g0")
+//aria: stan_flags = c("STAN_NO_RANGE_CHECKS","STAN_CPP_OPTIMS")
 
 ////
 // Glossary
@@ -89,20 +91,26 @@ data{
 
 transformed data{
 
-	// compute indices for fast rows_dot_product computation of group-level coefficients
-	array[rXg*nXc] int i_arr_Xg ; // will be rep(1:rXg,times=nXc)
-	array[rXg*nXc] int i_arr_Z ; // will be rep(1:nXc,each=rXg)
+	// tXg: transposed copy of Xg
+	matrix[nXg,rXg] tXg = transpose(Xg) ;
+
+	// tXc: transposed copy of Xc
+	matrix[nXc,rXc] tXc = transpose(Xc) ;
+
+	// compute indices for fast columns_dot_product computation of group-level coefficients
+	array[rXg*nXc] int i_tXg_col_for_dot ; // will be rep(1:rXg,each=nXc)
+	array[rXg*nXc] int i_Z_col_for_dot ; // will be rep(1:nXc,times=rXg)
 	int i = 0 ;
-	for(i_nXc in 1:nXc){
-		for(i_rXg in 1:rXg){
+	for(i_rXg in 1:rXg){
+		for(i_nXc in 1:nXc){
 			i += 1 ;
-			i_arr_Xg[i] = i_rXg ;
-			i_arr_Z[i] = i_nXc ;
+			i_tXg_col_for_dot[i] = i_rXg ;
+			i_Z_col_for_dot[i] = i_nXc ;
 		}
 	}
 
-	// Xg_for_dot_Z: Xg with rows repeated through index i_arr_Xg
-	matrix[rXg*nXc,nXg] Xg_for_dot_Z = Xg[i_arr_Xg] ;
+	// tXg_for_dot_Z: tXg with columns repeated through index i_tXg_col_for_dot
+	matrix[nXg,rXg*nXc] tXg_for_dot_Z = tXg[,i_tXg_col_for_dot] ;
 
 }
 
@@ -112,7 +120,7 @@ parameters{
 	real<lower=0> Y_sd ;
 
 	// Z: coefficients associated with predictors (group-level, condition-level, & interactions)
-	matrix[nXc,nXg] Z ;
+	matrix[nXg,nXc] Z ;
 
 	// iZc_sd: magnitude of variability among individuals within a group
 	vector<lower=0>[nXc] iZc_sd ;
@@ -125,7 +133,7 @@ parameters{
 	//  Hopefully Stan will soon allow matrix arguments to multi_normal_*(), which would obviate this hack.
 
 	// iZc: by-individual coefficients (centered parameterization)
-	array[nI*centered] row_vector[nXc] iZc ;
+	array[nI*centered] vector[nXc] iZc ;
 
 	// iZc_: helper-variable (note underscore suffix) for non-centered parameterization of iZc
 	array[(1-centered)] matrix[nXc,nI] iZc_ ;
@@ -142,9 +150,12 @@ model{
 	to_vector(Z) ~ std_normal() ;
 
 	// compute condition coefficients for each group using the group predictors and coefficients
-	matrix[rXg,nXc] gZc = to_matrix(
-		rows_dot_product( Z[i_arr_Z] , Xg_for_dot_Z )
-		, rXg, nXc
+	matrix[nXc,rXg] gZc = to_matrix(
+		columns_dot_product(
+			Z[,i_Z_col_for_dot]
+			, tXg_for_dot_Z
+		)
+		, nXc, rXg
 	) ;
 
 	////
@@ -157,13 +168,13 @@ model{
 	// flat prior on correlations
 	iZc_cholcorr ~ lkj_corr_cholesky(1) ;
 
-	matrix[nI,nXc] iZc_mat ;
+	matrix[nXc,nI] iZc_mat ;
 	if(centered==1){
 
-		//convert gZc from matrix to array of row-vectors
-		array[rXg] row_vector[nXc] gZc_arr ;
+		//convert gZc from matrix to array of vectors
+		array[rXg] vector[nXc] gZc_arr ;
 		for(this_rXg in 1:rXg){
-			gZc_arr[this_rXg] = gZc[this_rXg] ;
+			gZc_arr[this_rXg] = gZc[,this_rXg] ;
 		}
 
 		// multi-normal structure for iZc
@@ -172,11 +183,11 @@ model{
 			, diag_pre_multiply(iZc_sd, iZc_cholcorr)
 		) ;
 
-		//convert iZc from array of row-vectors to matrix
+		//convert iZc from array of vectors to matrix
 		// (hopefully replaceable by `to_matrix(iZc)` soon,
 		// see: https://github.com/stan-dev/cmdstan/issues/1015 )
 		for(this_nI in 1:nI){
-			iZc_mat[this_nI] = iZc[this_nI] ;
+			iZc_mat[,this_nI] = iZc[this_nI] ;
 		}
 
 	}else{
@@ -186,8 +197,8 @@ model{
 		// compute values for individuals given group associated group values and the individuals'
 		//   deviations therefrom
 		iZc_mat = (
-			gZc[iXg]
-			+ transpose(
+			gZc[,iXg]
+			+ (
 				diag_pre_multiply(
 					iZc_sd
 					, iZc_cholcorr
@@ -200,7 +211,7 @@ model{
 
 	// using the indivividual condition coefficients and predictors, compute
 	// values for each individual
-	vector[rXc] iZc_dot_Xc = rows_dot_product( iZc_mat[iXc] , Xc ) ;
+	row_vector[rXc] iZc_dot_Xc = columns_dot_product( iZc_mat[,iXc] , tXc ) ;
 
 	////
 	// observation-level structure
