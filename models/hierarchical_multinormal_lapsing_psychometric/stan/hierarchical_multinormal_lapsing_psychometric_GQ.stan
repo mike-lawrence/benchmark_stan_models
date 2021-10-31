@@ -165,7 +165,7 @@ parameters{
 	vector<lower=0>[nXc21] iZc_sd ;
 
 	// iZc_cholcorr: cholesky-factor of correlation structure associated with variability among individuals on influence of within-individual predictors
-	cholesky_factor_corr[nXc21] iZc_cholcorr ;
+	matrix[nXc21,nXc21] iZc_cholcorr ;
 
 	//next two parameters represent the same quantity, just with structures suitable for either
 	//  centered or non-centered parameterization. The `centered` data variable will make one or the other zero-length.
