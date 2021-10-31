@@ -13,7 +13,7 @@ install_if_missing = function(pkgs){
 			path <-	find.package(basename(this_pkg),quiet=T,verbose=F)
 			, silent = T
 		)
-		if(is.null(path)){
+		if(length(path)==0){
 			missing_pkgs = c(missing_pkgs,this_pkg)
 		}
 	}
