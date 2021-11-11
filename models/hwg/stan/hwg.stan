@@ -69,6 +69,11 @@ data{
 	// centered: whether to monolithically-center (1) or non-center (2) mid-hierarchy parameters
 	int<lower=0,upper=1> centered ;
 
+transformed data{
+
+	// tXc: transposed copy of Xc
+	matrix[nXc,rXc] tXc = transpose(Xc) ;
+
 }
 
 parameters{
@@ -77,7 +82,7 @@ parameters{
 	real<lower=0> Y_sd ;
 
 	// Z: coefficients associated with predictors (group-level, condition-level, & interactions)
-	row_vector[nXc] Zc ;
+	vector[nXc] Zc ;
 
 	// iZc_sd: magnitude of variability among individuals within a group
 	vector<lower=0>[nXc] iZc_sd ;
@@ -90,7 +95,7 @@ parameters{
 	//  Hopefully Stan will soon allow matrix arguments to multi_normal_*(), which would obviate this hack.
 
 	// iZc: by-individual coefficients (centered parameterization)
-	array[nI*centered] row_vector[nXc] iZc ;
+	array[nI*centered] vector[nXc] iZc ;
 
 	// iZc_: helper-variable (note underscore suffix) for non-centered parameterization of iZc
 	array[(1-centered)] matrix[nXc,nI] iZc_ ;
@@ -117,7 +122,7 @@ model{
 	// flat prior on correlations
 	iZc_cholcorr ~ lkj_corr_cholesky(1) ;
 
-	matrix[nI,nXc] iZc_mat ;
+	matrix[nXc,nI] iZc_mat ;
 	if(centered==1){
 
 		// multi-normal structure for iZc
@@ -126,11 +131,11 @@ model{
 			, diag_pre_multiply(iZc_sd, iZc_cholcorr)
 		) ;
 
-		//convert iZc from array of row-vectors to matrix
+		//convert iZc from array of vectors to matrix
 		// (hopefully replaceable by `to_matrix(iZc)` soon,
 		// see: https://github.com/stan-dev/cmdstan/issues/1015 )
 		for(this_nI in 1:nI){
-			iZc_mat[this_nI] = iZc[this_nI] ;
+			iZc_mat[,this_nI] = iZc[this_nI] ;
 		}
 
 	}else{
@@ -141,7 +146,7 @@ model{
 		//   deviations therefrom
 		iZc_mat = (
 			rep_matrix(Zc,nI)
-			+ transpose(
+			+ (
 				diag_pre_multiply(
 					iZc_sd
 					, iZc_cholcorr
@@ -154,7 +159,7 @@ model{
 
 	// using the indivividual condition coefficients and predictors, compute
 	// values for each individual
-	vector[rXc] iZc_dot_Xc = rows_dot_product( iZc_mat[iXc] , Xc ) ;
+	row_vector[rXc] iZc_dot_Xc = columns_dot_product( iZc_mat[,iXc] , tXc ) ;
 
 	////
 	// observation-level structure
