@@ -44,6 +44,11 @@ functions{
 		}
 		return(out) ;
 	}
+
+	real partial_lpdf( real[] Y_slice, int start, int end, row_vector mu, real sigma ){
+		return(	normal_lpdf( Y_slice | mu[start:end] , sigma ) ) ;
+	}
+
 }
 
 data{
@@ -86,6 +91,9 @@ data{
 
 	// centered: whether to monolithically-center (1) or non-center (2) mid-hierarchy parameters
 	int<lower=0,upper=1> centered ;
+
+	// use_reduce_sum: whether to use reeduce_sum for parallel computation of the likelihood
+	int<lower=0,upper=1> use_reduce_sum ;
 
 }
 
@@ -221,10 +229,20 @@ model{
 	Y_sd ~ weibull(2,1) ;
 
 	// observations as normal with common error variability and varying mean
-	Y ~ normal(
-		iZc_dot_Xc[yXc]
-		, Y_sd
-	) ;
+	if(use_reduce_sum==0){
+		Y ~ normal(
+			iZc_dot_Xc[yXc]
+			, Y_sd
+		) ;
+	}else{
+		target += reduce_sum(
+			partial_lupdf
+			, Y
+			, 1 //grain-size (1=auto)
+			, iZc_dot_Xc[yXc]
+			, Y_sd
+		) ;
+	}
 
 }
 
