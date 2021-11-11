@@ -25,7 +25,7 @@ install_if_missing = function(pkgs){
 	github_missing = missing_pkgs[grepl('github.com/',fixed=T,missing_pkgs)]
 	github_missing = gsub('github.com/','',github_missing)
 	if(length(github_missing)>0){
-		message('The following required but uninstalled Github packages will now be installed:\n',paste(this_pkg,collapse='\n'))
+		message('The following required but uninstalled Github packages will now be installed:\n',paste(github_missing,collapse='\n'))
 		remotes::install_github(github_missing)
 	}
 	invisible()
