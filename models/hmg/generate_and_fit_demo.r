@@ -386,6 +386,9 @@ data_for_stan$centered = F
 # conversion to 1/0 for stan
 data_for_stan$centered = as.numeric(data_for_stan$centered)
 
+#choose whether to use reduce_sum or not:
+data_for_stan$use_reduce_sum = 0L
+
 # set the posterior path (automated but you could do your own if you had multiple models)
 (
 	mod_path
