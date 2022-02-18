@@ -45,7 +45,7 @@ functions{
 		return(out) ;
 	}
 
-	real partial_lpdf( real[] Y_slice, int start, int end, row_vector mu, real sigma ){
+	real partial_lpdf( array[] real Y_slice, int start, int end, row_vector mu, real sigma ){
 		return(	normal_lpdf( Y_slice | mu[start:end] , sigma ) ) ;
 	}
 
@@ -84,7 +84,7 @@ data{
 	int<lower=nI> nY ;
 
 	// Y: observations
-	vector[nY] Y ;
+	array[nY] real Y ;
 
 	// yXc: which row in Xc is associated with each observation in Y
 	array[nY] int<lower=1,upper=rXc> yXc ;
